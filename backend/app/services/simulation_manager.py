@@ -476,6 +476,30 @@ class SimulationManager:
                         simulations.append(state)
         
         return simulations
+
+    def delete_simulation(self, simulation_id: str) -> bool:
+        """
+        删除模拟记录及其文件目录
+
+        Args:
+            simulation_id: 模拟ID
+
+        Returns:
+            是否删除成功
+        """
+        sim_dir = os.path.join(self.SIMULATION_DATA_DIR, simulation_id)
+        if not os.path.exists(sim_dir) or not os.path.isdir(sim_dir):
+            return False
+
+        try:
+            shutil.rmtree(sim_dir)
+            if simulation_id in self._simulations:
+                del self._simulations[simulation_id]
+            logger.info(f"已删除模拟记录: {simulation_id}")
+            return True
+        except Exception as e:
+            logger.error(f"删除模拟记录失败: {simulation_id}, error={e}")
+            return False
     
     def get_profiles(self, simulation_id: str, platform: str = "reddit") -> List[Dict[str, Any]]:
         """获取模拟的Agent Profile"""

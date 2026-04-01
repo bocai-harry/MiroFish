@@ -10,6 +10,7 @@ Zep检索工具服务
 
 import time
 import json
+import re
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 
@@ -429,6 +430,7 @@ class ZepToolsService:
         self.client = Zep(api_key=self.api_key)
         # LLM客户端用于InsightForge生成子问题
         self._llm_client = llm_client
+        self._summary_zh_cache: Dict[str, str] = {}
         logger.info("ZepToolsService 初始化完成")
     
     @property
@@ -437,6 +439,69 @@ class ZepToolsService:
         if self._llm_client is None:
             self._llm_client = LLMClient()
         return self._llm_client
+
+    @staticmethod
+    def _needs_localize_to_zh(text: str) -> bool:
+        if not text or not text.strip():
+            return False
+        has_cjk = re.search(r'[\u4e00-\u9fff]', text) is not None
+        has_latin = re.search(r'[A-Za-z]', text) is not None
+        return has_latin and not has_cjk
+
+    def _localize_summaries_to_zh(self, summaries: List[str]) -> Dict[str, str]:
+        """批量将英文摘要转为中文，失败回退原文。"""
+        if not Config.LLM_API_KEY:
+            return {s: s for s in summaries}
+
+        pending = []
+        for s in summaries:
+            if not s:
+                continue
+            if s in self._summary_zh_cache:
+                continue
+            if self._needs_localize_to_zh(s):
+                pending.append(s)
+            else:
+                self._summary_zh_cache[s] = s
+
+        if pending:
+            batch_size = 20
+            for i in range(0, len(pending), batch_size):
+                batch = pending[i:i + batch_size]
+                try:
+                    response = self.llm.chat_json(
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "你是专业翻译与知识图谱摘要润色助手。"
+                                    "请将输入文本逐条转换为简洁、准确的中文描述。"
+                                    "仅返回JSON。"
+                                )
+                            },
+                            {
+                                "role": "user",
+                                "content": (
+                                    "请将以下 summary 列表翻译为中文，保持原意，不要编造信息。\n"
+                                    "返回格式：{\"translated\": [\"...\", \"...\"]}\n"
+                                    f"输入：{batch}"
+                                )
+                            }
+                        ],
+                        temperature=0.1
+                    )
+                    translated = response.get("translated", [])
+                    if not isinstance(translated, list) or len(translated) != len(batch):
+                        raise ValueError("翻译结果格式不匹配")
+                    for src, dst in zip(batch, translated):
+                        dst_text = str(dst).strip() if dst is not None else ""
+                        self._summary_zh_cache[src] = dst_text or src
+                except Exception as e:
+                    logger.warning(f"摘要中文化失败，回退原文（batch_start={i}）: {e}")
+                    for src in batch:
+                        self._summary_zh_cache[src] = src
+
+        return {s: self._summary_zh_cache.get(s, s) for s in summaries}
     
     def _call_with_retry(self, func, operation_name: str, max_retries: int = None):
         """带重试机制的API调用"""
@@ -517,16 +582,20 @@ class ZepToolsService:
             
             # 解析节点搜索结果
             if hasattr(search_results, 'nodes') and search_results.nodes:
+                raw_summaries = [getattr(node, 'summary', '') or '' for node in search_results.nodes]
+                summary_map = self._localize_summaries_to_zh(raw_summaries)
                 for node in search_results.nodes:
+                    raw_summary = getattr(node, 'summary', '') or ''
+                    localized_summary = summary_map.get(raw_summary, raw_summary)
                     nodes.append({
                         "uuid": getattr(node, 'uuid_', None) or getattr(node, 'uuid', ''),
                         "name": getattr(node, 'name', ''),
                         "labels": getattr(node, 'labels', []),
-                        "summary": getattr(node, 'summary', ''),
+                        "summary": localized_summary,
                     })
                     # 节点摘要也算作事实
-                    if hasattr(node, 'summary') and node.summary:
-                        facts.append(f"[{node.name}]: {node.summary}")
+                    if localized_summary:
+                        facts.append(f"[{node.name}]: {localized_summary}")
             
             logger.info(f"搜索完成: 找到 {len(facts)} 条相关事实")
             
@@ -660,15 +729,18 @@ class ZepToolsService:
         logger.info(f"获取图谱 {graph_id} 的所有节点...")
 
         nodes = fetch_all_nodes(self.client, graph_id)
+        raw_summaries = [getattr(node, 'summary', None) or "" for node in nodes]
+        summary_map = self._localize_summaries_to_zh(raw_summaries)
 
         result = []
         for node in nodes:
             node_uuid = getattr(node, 'uuid_', None) or getattr(node, 'uuid', None) or ""
+            raw_summary = node.summary or ""
             result.append(NodeInfo(
                 uuid=str(node_uuid) if node_uuid else "",
                 name=node.name or "",
                 labels=node.labels or [],
-                summary=node.summary or "",
+                summary=summary_map.get(raw_summary, raw_summary),
                 attributes=node.attributes or {}
             ))
 
@@ -738,7 +810,7 @@ class ZepToolsService:
                 uuid=getattr(node, 'uuid_', None) or getattr(node, 'uuid', ''),
                 name=node.name or "",
                 labels=node.labels or [],
-                summary=node.summary or "",
+                summary=self._localize_summaries_to_zh([node.summary or ""]).get(node.summary or "", node.summary or ""),
                 attributes=node.attributes or {}
             )
         except Exception as e:

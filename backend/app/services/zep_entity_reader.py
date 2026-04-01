@@ -4,6 +4,7 @@ Zep实体读取与过滤服务
 """
 
 import time
+import re
 from typing import Dict, Any, List, Optional, Set, Callable, TypeVar
 from dataclasses import dataclass, field
 
@@ -12,6 +13,7 @@ from zep_cloud.client import Zep
 from ..config import Config
 from ..utils.logger import get_logger
 from ..utils.zep_paging import fetch_all_nodes, fetch_all_edges
+from ..utils.llm_client import LLMClient
 
 logger = get_logger('mirofish.zep_entity_reader')
 
@@ -84,6 +86,86 @@ class ZepEntityReader:
             raise ValueError("ZEP_API_KEY 未配置")
         
         self.client = Zep(api_key=self.api_key)
+        self._llm: Optional[LLMClient] = None
+        self._summary_zh_cache: Dict[str, str] = {}
+
+    @property
+    def llm(self) -> Optional[LLMClient]:
+        """延迟初始化LLM客户端（用于摘要中文化）"""
+        if self._llm is not None:
+            return self._llm
+        if not Config.LLM_API_KEY:
+            return None
+        try:
+            self._llm = LLMClient()
+        except Exception as e:
+            logger.warning(f"初始化LLM客户端失败，跳过摘要中文化: {e}")
+            self._llm = None
+        return self._llm
+
+    @staticmethod
+    def _needs_localize_to_zh(text: str) -> bool:
+        if not text or not text.strip():
+            return False
+        has_cjk = re.search(r'[\u4e00-\u9fff]', text) is not None
+        has_latin = re.search(r'[A-Za-z]', text) is not None
+        return has_latin and not has_cjk
+
+    def _localize_summaries_to_zh(self, summaries: List[str]) -> Dict[str, str]:
+        """批量将英文摘要转为中文，失败回退原文。"""
+        llm = self.llm
+        if not llm:
+            return {s: s for s in summaries}
+
+        pending = []
+        for s in summaries:
+            if not s:
+                continue
+            if s in self._summary_zh_cache:
+                continue
+            if self._needs_localize_to_zh(s):
+                pending.append(s)
+            else:
+                self._summary_zh_cache[s] = s
+
+        if pending:
+            batch_size = 20
+            for i in range(0, len(pending), batch_size):
+                batch = pending[i:i + batch_size]
+                try:
+                    response = llm.chat_json(
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "你是专业翻译与知识图谱摘要润色助手。"
+                                    "请将输入文本逐条转换为简洁、准确的中文描述。"
+                                    "仅返回JSON。"
+                                )
+                            },
+                            {
+                                "role": "user",
+                                "content": (
+                                    "请将以下 summary 列表翻译为中文，保持原意，不要编造信息。\n"
+                                    "返回格式：{\"translated\": [\"...\", \"...\"]}\n"
+                                    f"输入：{batch}"
+                                )
+                            }
+                        ],
+                        temperature=0.1
+                    )
+                    translated = response.get("translated", [])
+                    if not isinstance(translated, list) or len(translated) != len(batch):
+                        raise ValueError("翻译结果格式不匹配")
+                    for src, dst in zip(batch, translated):
+                        dst_text = str(dst).strip() if dst is not None else ""
+                        self._summary_zh_cache[src] = dst_text or src
+                except Exception as e:
+                    logger.warning(f"摘要中文化失败，回退原文（batch_start={i}）: {e}")
+                    for src in batch:
+                        self._summary_zh_cache[src] = src
+
+        return {s: self._summary_zh_cache.get(s, s) for s in summaries}
     
     def _call_with_retry(
         self, 
@@ -137,14 +219,17 @@ class ZepEntityReader:
         logger.info(f"获取图谱 {graph_id} 的所有节点...")
 
         nodes = fetch_all_nodes(self.client, graph_id)
+        raw_summaries = [getattr(node, 'summary', None) or "" for node in nodes]
+        summary_map = self._localize_summaries_to_zh(raw_summaries)
 
         nodes_data = []
         for node in nodes:
+            raw_summary = node.summary or ""
             nodes_data.append({
                 "uuid": getattr(node, 'uuid_', None) or getattr(node, 'uuid', ''),
                 "name": node.name or "",
                 "labels": node.labels or [],
-                "summary": node.summary or "",
+                "summary": summary_map.get(raw_summary, raw_summary),
                 "attributes": node.attributes or {},
             })
 
@@ -400,7 +485,7 @@ class ZepEntityReader:
                 uuid=getattr(node, 'uuid_', None) or getattr(node, 'uuid', ''),
                 name=node.name or "",
                 labels=node.labels or [],
-                summary=node.summary or "",
+                summary=self._localize_summaries_to_zh([node.summary or ""]).get(node.summary or "", node.summary or ""),
                 attributes=node.attributes or {},
                 related_edges=related_edges,
                 related_nodes=related_nodes,

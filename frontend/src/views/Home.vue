@@ -1,54 +1,6 @@
 <template>
   <div class="home-container">
-    <!-- 顶部导航栏 -->
-    <nav class="navbar">
-      <div class="nav-brand">MIROFISH</div>
-      <div class="nav-links">
-        <a href="https://github.com/666ghj/MiroFish" target="_blank" class="github-link">
-          访问我们的Github主页 <span class="arrow">↗</span>
-        </a>
-      </div>
-    </nav>
-
     <div class="main-content">
-      <!-- 上半部分：Hero 区域 -->
-      <section class="hero-section">
-        <div class="hero-left">
-          <div class="tag-row">
-            <span class="orange-tag">简洁通用的群体智能引擎</span>
-            <span class="version-text">/ v0.1-预览版</span>
-          </div>
-          
-          <h1 class="main-title">
-            上传任意报告<br>
-            <span class="gradient-text">即刻推演未来</span>
-          </h1>
-          
-          <div class="hero-desc">
-            <p>
-              即使只有一段文字，<span class="highlight-bold">MiroFish</span> 也能基于其中的现实种子，全自动生成与之对应的至多<span class="highlight-orange">百万级Agent</span>构成的平行世界。通过上帝视角注入变量，在复杂的群体交互中寻找动态环境下的<span class="highlight-code">“局部最优解”</span>
-            </p>
-            <p class="slogan-text">
-              让未来在 Agent 群中预演，让决策在百战后胜出<span class="blinking-cursor">_</span>
-            </p>
-          </div>
-           
-          <div class="decoration-square"></div>
-        </div>
-        
-        <div class="hero-right">
-          <!-- Logo 区域 -->
-          <div class="logo-container">
-            <img src="../assets/logo/MiroFish_logo_left.jpeg" alt="MiroFish Logo" class="hero-logo" />
-          </div>
-          
-          <button class="scroll-down-btn" @click="scrollToBottom">
-            ↓
-          </button>
-        </div>
-      </section>
-
-      <!-- 下半部分：双栏布局 -->
       <section class="dashboard-section">
         <!-- 左栏：状态与步骤 -->
         <div class="left-panel">
@@ -280,14 +232,6 @@ const removeFile = (index) => {
   files.value.splice(index, 1)
 }
 
-// 滚动到底部
-const scrollToBottom = () => {
-  window.scrollTo({
-    top: document.body.scrollHeight,
-    behavior: 'smooth'
-  })
-}
-
 // 开始模拟 - 立即跳转，API调用在Process页面进行
 const startSimulation = () => {
   if (!canSubmit.value || loading.value) return
@@ -330,207 +274,11 @@ const startSimulation = () => {
   color: var(--black);
 }
 
-/* 顶部导航 */
-.navbar {
-  height: 60px;
-  background: var(--black);
-  color: var(--white);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 40px;
-}
-
-.nav-brand {
-  font-family: var(--font-mono);
-  font-weight: 800;
-  letter-spacing: 1px;
-  font-size: 1.2rem;
-}
-
-.nav-links {
-  display: flex;
-  align-items: center;
-}
-
-.github-link {
-  color: var(--white);
-  text-decoration: none;
-  font-family: var(--font-mono);
-  font-size: 0.9rem;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: opacity 0.2s;
-}
-
-.github-link:hover {
-  opacity: 0.8;
-}
-
-.arrow {
-  font-family: sans-serif;
-}
-
 /* 主要内容区 */
 .main-content {
   max-width: 1400px;
   margin: 0 auto;
   padding: 60px 40px;
-}
-
-/* Hero 区域 */
-.hero-section {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 80px;
-  position: relative;
-}
-
-.hero-left {
-  flex: 1;
-  padding-right: 60px;
-}
-
-.tag-row {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  margin-bottom: 25px;
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-}
-
-.orange-tag {
-  background: var(--orange);
-  color: var(--white);
-  padding: 4px 10px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  font-size: 0.75rem;
-}
-
-.version-text {
-  color: #999;
-  font-weight: 500;
-  letter-spacing: 0.5px;
-}
-
-.main-title {
-  font-size: 4.5rem;
-  line-height: 1.2;
-  font-weight: 500;
-  margin: 0 0 40px 0;
-  letter-spacing: -2px;
-  color: var(--black);
-}
-
-.gradient-text {
-  background: linear-gradient(90deg, #000000 0%, #444444 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  display: inline-block;
-}
-
-.hero-desc {
-  font-size: 1.05rem;
-  line-height: 1.8;
-  color: var(--gray-text);
-  max-width: 640px;
-  margin-bottom: 50px;
-  font-weight: 400;
-  text-align: justify;
-}
-
-.hero-desc p {
-  margin-bottom: 1.5rem;
-}
-
-.highlight-bold {
-  color: var(--black);
-  font-weight: 700;
-}
-
-.highlight-orange {
-  color: var(--orange);
-  font-weight: 700;
-  font-family: var(--font-mono);
-}
-
-.highlight-code {
-  background: rgba(0, 0, 0, 0.05);
-  padding: 2px 6px;
-  border-radius: 2px;
-  font-family: var(--font-mono);
-  font-size: 0.9em;
-  color: var(--black);
-  font-weight: 600;
-}
-
-.slogan-text {
-  font-size: 1.2rem;
-  font-weight: 520;
-  color: var(--black);
-  letter-spacing: 1px;
-  border-left: 3px solid var(--orange);
-  padding-left: 15px;
-  margin-top: 20px;
-}
-
-.blinking-cursor {
-  color: var(--orange);
-  animation: blink 1s step-end infinite;
-  font-weight: 700;
-}
-
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
-.decoration-square {
-  width: 16px;
-  height: 16px;
-  background: var(--orange);
-}
-
-.hero-right {
-  flex: 0.8;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: flex-end;
-}
-
-.logo-container {
-  width: 100%;
-  display: flex;
-  justify-content: flex-end;
-  padding-right: 40px;
-}
-
-.hero-logo {
-  max-width: 500px; /* 调整logo大小 */
-  width: 100%;
-}
-
-.scroll-down-btn {
-  width: 40px;
-  height: 40px;
-  border: 1px solid var(--border);
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: var(--orange);
-  font-size: 1.2rem;
-  transition: all 0.2s;
-}
-
-.scroll-down-btn:hover {
-  border-color: var(--orange);
 }
 
 /* Dashboard 双栏布局 */
@@ -871,20 +619,6 @@ const startSimulation = () => {
 @media (max-width: 1024px) {
   .dashboard-section {
     flex-direction: column;
-  }
-  
-  .hero-section {
-    flex-direction: column;
-  }
-  
-  .hero-left {
-    padding-right: 0;
-    margin-bottom: 40px;
-  }
-  
-  .hero-logo {
-    max-width: 200px;
-    margin-bottom: 20px;
   }
 }
 </style>

@@ -408,6 +408,15 @@ def build_graph():
                 # 更新项目的graph_id
                 project.graph_id = graph_id
                 ProjectManager.save_project(project)
+                task_manager.update_task(
+                    task_id,
+                    message=f"图谱已创建: {graph_id}",
+                    progress=12,
+                    progress_detail={
+                        "stage": "graph_created",
+                        "graph_id": graph_id
+                    }
+                )
                 
                 # 设置本体
                 task_manager.update_task(

@@ -3,10 +3,10 @@
 接口2：使用Zep API构建Standalone Graph
 """
 
-import os
 import uuid
 import time
 import threading
+import re
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass
 
@@ -16,7 +16,11 @@ from zep_cloud import EpisodeData, EntityEdgeSourceTarget
 from ..config import Config
 from ..models.task import TaskManager, TaskStatus
 from ..utils.zep_paging import fetch_all_nodes, fetch_all_edges
+from ..utils.llm_client import LLMClient
+from ..utils.logger import get_logger
 from .text_processor import TextProcessor
+
+logger = get_logger('mirofish.graph_builder')
 
 
 @dataclass
@@ -49,6 +53,94 @@ class GraphBuilderService:
         
         self.client = Zep(api_key=self.api_key)
         self.task_manager = TaskManager()
+        self._llm: Optional[LLMClient] = None
+        self._summary_zh_cache: Dict[str, str] = {}
+
+    @property
+    def llm(self) -> Optional[LLMClient]:
+        """延迟初始化LLM客户端（用于摘要中文化）"""
+        if self._llm is not None:
+            return self._llm
+        if not Config.LLM_API_KEY:
+            return None
+        try:
+            self._llm = LLMClient()
+        except Exception as e:
+            logger.warning(f"初始化LLM客户端失败，跳过摘要中文化: {e}")
+            self._llm = None
+        return self._llm
+
+    @staticmethod
+    def _needs_localize_to_zh(text: str) -> bool:
+        """判断文本是否需要中文化（主要是英文摘要）"""
+        if not text or not text.strip():
+            return False
+        has_cjk = re.search(r'[\u4e00-\u9fff]', text) is not None
+        has_latin = re.search(r'[A-Za-z]', text) is not None
+        # 只要包含明显英文且不含中文，就进行中文化
+        return has_latin and not has_cjk
+
+    def _localize_summaries_to_zh(self, summaries: List[str]) -> Dict[str, str]:
+        """
+        使用LLM将英文摘要转为中文摘要（批量）。
+        若LLM不可用或失败，回退原文。
+        """
+        llm = self.llm
+        if not llm:
+            return {s: s for s in summaries}
+
+        candidates = []
+        for s in summaries:
+            if not s:
+                continue
+            cached = self._summary_zh_cache.get(s)
+            if cached is not None:
+                continue
+            if self._needs_localize_to_zh(s):
+                candidates.append(s)
+            else:
+                self._summary_zh_cache[s] = s
+
+        if not candidates:
+            return {s: self._summary_zh_cache.get(s, s) for s in summaries}
+
+        batch_size = 20
+        for i in range(0, len(candidates), batch_size):
+            batch = candidates[i:i + batch_size]
+            try:
+                response = llm.chat_json(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "你是专业翻译与知识图谱摘要润色助手。"
+                                "请将输入文本逐条转换为简洁、准确的中文描述。"
+                                "仅返回JSON，不要额外解释。"
+                            )
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                "请将以下 summary 列表翻译为中文，保持原意，不要编造信息。\n"
+                                "返回格式：{\"translated\": [\"...\", \"...\"]}\n"
+                                f"输入：{batch}"
+                            )
+                        }
+                    ],
+                    temperature=0.1
+                )
+                translated = response.get("translated", [])
+                if not isinstance(translated, list) or len(translated) != len(batch):
+                    raise ValueError("翻译结果格式不匹配")
+                for src, dst in zip(batch, translated):
+                    dst_text = str(dst).strip() if dst is not None else ""
+                    self._summary_zh_cache[src] = dst_text or src
+            except Exception as e:
+                logger.warning(f"摘要中文化失败，回退原文（batch_start={i}）: {e}")
+                for src in batch:
+                    self._summary_zh_cache[src] = src
+
+        return {s: self._summary_zh_cache.get(s, s) for s in summaries}
     
     def build_graph_async(
         self,
@@ -435,18 +527,22 @@ class GraphBuilderService:
         for node in nodes:
             node_map[node.uuid_] = node.name or ""
         
+        raw_summaries = [getattr(node, 'summary', None) or "" for node in nodes]
+        summary_map = self._localize_summaries_to_zh(raw_summaries)
+
         nodes_data = []
         for node in nodes:
             # 获取创建时间
             created_at = getattr(node, 'created_at', None)
             if created_at:
                 created_at = str(created_at)
+            raw_summary = node.summary or ""
             
             nodes_data.append({
                 "uuid": node.uuid_,
                 "name": node.name,
                 "labels": node.labels or [],
-                "summary": node.summary or "",
+                "summary": summary_map.get(raw_summary, raw_summary),
                 "attributes": node.attributes or {},
                 "created_at": created_at,
             })

@@ -14,6 +14,7 @@
     <div class="section-header">
       <div class="section-line"></div>
       <span class="section-title">推演记录</span>
+      <span v-if="projects.length > 0" class="section-count">{{ projects.length }} 条</span>
       <div class="section-line"></div>
     </div>
 
@@ -183,6 +184,12 @@
             <div class="modal-playback-hint">
               <span class="hint-text">Step3「开始模拟」与 Step5「深度互动」需在运行中启动，不支持历史回放</span>
             </div>
+
+            <div class="modal-danger-zone">
+              <button class="modal-delete-btn" :disabled="deleting" @click="handleDeleteSelectedProject">
+                {{ deleting ? '删除中...' : '删除本条推演记录' }}
+              </button>
+            </div>
           </div>
         </div>
       </Transition>
@@ -193,7 +200,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, onActivated, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { getSimulationHistory } from '../api/simulation'
+import { getSimulationHistory, deleteSimulation } from '../api/simulation'
 
 const router = useRouter()
 const route = useRoute()
@@ -201,10 +208,11 @@ const route = useRoute()
 // 状态
 const projects = ref([])
 const loading = ref(true)
-const isExpanded = ref(false)
+const isExpanded = ref(true)
 const hoveringCard = ref(null)
 const historyContainer = ref(null)
 const selectedProject = ref(null)  // 当前选中的项目（用于弹窗）
+const deleting = ref(false)
 let observer = null
 let isAnimating = false  // 动画锁，防止闪烁
 let expandDebounceTimer = null  // 防抖定时器
@@ -401,6 +409,29 @@ const closeModal = () => {
   selectedProject.value = null
 }
 
+const handleDeleteSelectedProject = async () => {
+  if (!selectedProject.value?.simulation_id || deleting.value) return
+
+  const simulationId = selectedProject.value.simulation_id
+  const ok = window.confirm(`确认删除推演记录 ${formatSimulationId(simulationId)} 吗？该操作不可撤销。`)
+  if (!ok) return
+
+  try {
+    deleting.value = true
+    const res = await deleteSimulation(simulationId)
+    if (!res?.success) {
+      throw new Error(res?.error || '删除失败')
+    }
+    closeModal()
+    await loadHistory()
+  } catch (error) {
+    console.error('删除推演记录失败:', error)
+    window.alert(`删除失败：${error?.message || '请稍后重试'}`)
+  } finally {
+    deleting.value = false
+  }
+}
+
 // 导航到图谱构建页面（Project）
 const goToProject = () => {
   if (selectedProject.value?.project_id) {
@@ -438,7 +469,7 @@ const goToReport = () => {
 const loadHistory = async () => {
   try {
     loading.value = true
-    const response = await getSimulationHistory(20)
+    const response = await getSimulationHistory(100)
     if (response.success) {
       projects.value = response.data || []
     }
@@ -459,7 +490,9 @@ const initObserver = () => {
   observer = new IntersectionObserver(
     (entries) => {
       entries.forEach((entry) => {
-        const shouldExpand = entry.isIntersecting
+        // 历史记录默认保持展开，仅在首次进入视口时触发展开动画
+        if (!entry.isIntersecting) return
+        const shouldExpand = true
         
         // 更新待执行的目标状态（无论是否在动画中都要记录最新的目标状态）
         pendingState = shouldExpand
@@ -649,6 +682,13 @@ onUnmounted(() => {
   color: #9CA3AF;
   letter-spacing: 3px;
   text-transform: uppercase;
+}
+
+.section-count {
+  font-size: 0.7rem;
+  color: #9CA3AF;
+  letter-spacing: 1px;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 /* 卡片容器 */
@@ -1336,5 +1376,33 @@ onUnmounted(() => {
   letter-spacing: 0.3px;
   text-align: center;
   line-height: 1.5;
+}
+
+.modal-danger-zone {
+  display: flex;
+  justify-content: center;
+  padding: 0 32px 24px;
+}
+
+.modal-delete-btn {
+  border: 1px solid #FCA5A5;
+  background: #FEF2F2;
+  color: #B91C1C;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  padding: 10px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modal-delete-btn:hover {
+  background: #FEE2E2;
+  border-color: #F87171;
+}
+
+.modal-delete-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>
